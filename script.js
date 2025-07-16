@@ -3,6 +3,23 @@ let scene, camera, renderer, model;
 let rotationVector;
 let backgroundScene, backgroundCamera, backgroundMesh, shaderUniforms;
 
+// Mouse interaction variables
+let mouse = new THREE.Vector2();
+let mouseDown = false;
+let mousePosition = new THREE.Vector2();
+let targetPosition = new THREE.Vector3();
+let currentPosition = new THREE.Vector3();
+let rotationSpeed = 0.01;
+let positionLerpSpeed = 0.05;
+let isDragging = false;
+let lastMousePosition = new THREE.Vector2();
+
+// Momentum variables for flick effect
+let rotationVelocity = new THREE.Vector3();
+let momentumDecay = 0.98; // How quickly momentum fades
+let maxVelocity = 0.05; // Maximum rotation speed
+let lastDeltaTime = 0;
+
 function init() {
     scene = new THREE.Scene();
 
@@ -26,6 +43,9 @@ function init() {
     setupLighting();
     generateRandomRotation();
     loadModel();
+
+    // Add mouse event listeners
+    setupMouseControls();
 
     window.addEventListener('resize', onWindowResize);
     animate();
@@ -194,6 +214,142 @@ vec3 getRainbow(vec2 fragCoord){
     );
 }
 
+function setupMouseControls() {
+    const canvas = renderer.domElement;
+    
+    // Mouse down event
+    canvas.addEventListener('mousedown', (event) => {
+        mouseDown = true;
+        isDragging = true;
+        lastMousePosition.set(event.clientX, event.clientY);
+        // Reset momentum when starting new interaction
+        rotationVelocity.set(0, 0, 0);
+        event.preventDefault();
+    });
+    
+    // Mouse move event
+    canvas.addEventListener('mousemove', (event) => {
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        
+        if (mouseDown && model) {
+            // Calculate mouse movement delta
+            const deltaX = event.clientX - lastMousePosition.x;
+            const deltaY = event.clientY - lastMousePosition.y;
+            
+            // Calculate rotation velocity based on mouse movement speed
+            const mouseSpeed = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+            const velocityMultiplier = Math.min(mouseSpeed * 0.001, maxVelocity);
+            
+            // Update rotation velocity
+            rotationVelocity.y += deltaX * velocityMultiplier;
+            rotationVelocity.x += deltaY * velocityMultiplier;
+            
+            // Clamp velocity to maximum
+            rotationVelocity.x = Math.max(-maxVelocity, Math.min(maxVelocity, rotationVelocity.x));
+            rotationVelocity.y = Math.max(-maxVelocity, Math.min(maxVelocity, rotationVelocity.y));
+            
+            // Apply rotation directly while dragging
+            model.rotation.y += deltaX * rotationSpeed * 0.01;
+            model.rotation.x += deltaY * rotationSpeed * 0.01;
+            
+            // Update position based on mouse movement with constraints
+            const moveSpeed = 0.01;
+            const maxDistance = 3; // Maximum distance from center
+            
+            targetPosition.x += deltaX * moveSpeed;
+            targetPosition.y -= deltaY * moveSpeed;
+            
+            // Constrain movement to a circular area
+            const distance = Math.sqrt(targetPosition.x * targetPosition.x + targetPosition.y * targetPosition.y);
+            if (distance > maxDistance) {
+                targetPosition.x = (targetPosition.x / distance) * maxDistance;
+                targetPosition.y = (targetPosition.y / distance) * maxDistance;
+            }
+            
+            lastMousePosition.set(event.clientX, event.clientY);
+        }
+        
+        event.preventDefault();
+    });
+    
+    // Mouse up event
+    canvas.addEventListener('mouseup', (event) => {
+        mouseDown = false;
+        isDragging = false;
+        // Keep the rotation velocity for momentum effect
+        // Don't reset it here - let it decay naturally
+        event.preventDefault();
+    });
+    
+    // Mouse leave event
+    canvas.addEventListener('mouseleave', (event) => {
+        mouseDown = false;
+        isDragging = false;
+        event.preventDefault();
+    });
+    
+    // Touch events for mobile support
+    canvas.addEventListener('touchstart', (event) => {
+        mouseDown = true;
+        isDragging = true;
+        const touch = event.touches[0];
+        lastMousePosition.set(touch.clientX, touch.clientY);
+        // Reset momentum when starting new interaction
+        rotationVelocity.set(0, 0, 0);
+        event.preventDefault();
+    });
+    
+    canvas.addEventListener('touchmove', (event) => {
+        const touch = event.touches[0];
+        mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
+        
+        if (mouseDown && model) {
+            const deltaX = touch.clientX - lastMousePosition.x;
+            const deltaY = touch.clientY - lastMousePosition.y;
+            
+            // Calculate rotation velocity based on touch movement speed
+            const touchSpeed = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+            const velocityMultiplier = Math.min(touchSpeed * 0.001, maxVelocity);
+            
+            // Update rotation velocity
+            rotationVelocity.y += deltaX * velocityMultiplier;
+            rotationVelocity.x += deltaY * velocityMultiplier;
+            
+            // Clamp velocity to maximum
+            rotationVelocity.x = Math.max(-maxVelocity, Math.min(maxVelocity, rotationVelocity.x));
+            rotationVelocity.y = Math.max(-maxVelocity, Math.min(maxVelocity, rotationVelocity.y));
+            
+            model.rotation.y += deltaX * rotationSpeed * 0.01;
+            model.rotation.x += deltaY * rotationSpeed * 0.01;
+            
+            const moveSpeed = 0.01;
+            const maxDistance = 3; // Maximum distance from center
+            
+            targetPosition.x += deltaX * moveSpeed;
+            targetPosition.y -= deltaY * moveSpeed;
+            
+            // Constrain movement to a circular area
+            const distance = Math.sqrt(targetPosition.x * targetPosition.x + targetPosition.y * targetPosition.y);
+            if (distance > maxDistance) {
+                targetPosition.x = (targetPosition.x / distance) * maxDistance;
+                targetPosition.y = (targetPosition.y / distance) * maxDistance;
+            }
+            
+            lastMousePosition.set(touch.clientX, touch.clientY);
+        }
+        
+        event.preventDefault();
+    });
+    
+    canvas.addEventListener('touchend', (event) => {
+        mouseDown = false;
+        isDragging = false;
+        event.preventDefault();
+    });
+}
+
 function animate() {
     requestAnimationFrame(animate);
     if (shaderUniforms) {
@@ -204,11 +360,37 @@ function animate() {
     renderer.render(backgroundScene, backgroundCamera);
     renderer.clearDepth();
     if (model) {
-        model.rotation.x += rotationVector.x * 0.01;
-        model.rotation.y += rotationVector.y * 0.01;
-        model.rotation.z += rotationVector.z * 0.01;
+        // Handle position snapping when not dragging
+        if (!isDragging) {
+            // Gradually snap back to center
+            targetPosition.lerp(new THREE.Vector3(0, 0, 0), positionLerpSpeed);
+        }
+        
+        // Smooth position interpolation
+        currentPosition.lerp(targetPosition, positionLerpSpeed);
+        model.position.copy(currentPosition);
+        
+        // Apply momentum rotation when not dragging
+        if (!isDragging) {
+            // Apply momentum rotation
+            model.rotation.x += rotationVelocity.x;
+            model.rotation.y += rotationVelocity.y;
+            
+            // Decay momentum
+            rotationVelocity.multiplyScalar(momentumDecay);
+            
+            // Apply automatic rotation only when momentum is very low
+            const momentumMagnitude = rotationVelocity.length();
+            if (momentumMagnitude < 0.001) {
+                model.rotation.x += rotationVector.x * 0.01;
+                model.rotation.y += rotationVector.y * 0.01;
+                model.rotation.z += rotationVector.z * 0.01;
+            }
+        }
+        
         model.userData.floatOffset = (model.userData.floatOffset || 0) + 0.02;
-        model.position.y = (model.userData.originalY || 0) + Math.sin(model.userData.floatOffset) * 0.3;
+        model.position.y = currentPosition.y + Math.sin(model.userData.floatOffset) * 0.3;
+        
         // Update rainbow uniforms for all meshes
         model.traverse(child => {
             if (child.isMesh && child.userData._rainbowUniforms) {

@@ -17,8 +17,36 @@
             width: 100vw;
             height: 100vh;
             position: relative;
+            cursor: grab;
         }
         
+        #container:active {
+            cursor: grabbing;
+        }
+        
+        .instructions {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 14px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px 15px;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+            z-index: 1000;
+            pointer-events: none;
+        }
+        
+        .instructions h3 {
+            margin: 0 0 8px 0;
+            font-size: 16px;
+        }
+        
+        .instructions p {
+            margin: 4px 0;
+            opacity: 0.9;
+        }
     </style>
 </head>
 <body>
