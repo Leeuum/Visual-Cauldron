@@ -13,13 +13,18 @@
 
 	<div id="container"></div>
 
-	<script type="importmap">
-		{
-			"imports": {
-				"three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
-				"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+	<!-- three.js version defined ONCE here; both import-map URLs are built from it -->
+	<script>
+		const THREE_VERSION = '0.180.0';
+		const importmap = document.createElement( 'script' );
+		importmap.type = 'importmap';
+		importmap.textContent = JSON.stringify( {
+			imports: {
+				'three': `https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/build/three.module.js`,
+				'three/addons/': `https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/examples/jsm/`
 			}
-		}
+		} );
+		document.currentScript.after( importmap );
 	</script>
 
 	<script type="module">
