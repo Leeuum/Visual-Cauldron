@@ -8,7 +8,7 @@ Early-stage "Visual Cauldron" landing page. Single self-contained HTML file, no 
 
 ## Saving
 
-After every edit to a file, save it. Run the `save` script — it stages everything (`git add -A`) and commits. The commit message is read from **stdin**, not passed as an argument, so pipe it in:
+After each logical change or completed task, save it (not every single file edit — group related edits into one save). Run the `save` script — it stages everything (`git add -A`) and commits. The commit message is read from **stdin**, not passed as an argument, so pipe it in:
 
 ```bash
 echo "short message describing the change" | save
