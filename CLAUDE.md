@@ -16,7 +16,7 @@ echo "short message describing the change" | save
 
 ## Running
 
-No build, no server config needed. Because it uses ES module imports, `file://` won't work — serve over HTTP from the repo root:
+No build, no server config needed. Because it uses ES module imports, `file://` won't work — must serve over HTTP. **Liam usually already has a server running in another window — don't start one unless asked.** If needed:
 
 ```bash
 python3 -m http.server 8000

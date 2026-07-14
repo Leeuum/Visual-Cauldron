@@ -32,6 +32,7 @@
 
 		import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 		import { MarchingCubes } from 'three/addons/objects/MarchingCubes.js';
+		import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 		let container;
 
@@ -92,6 +93,36 @@
 			effect.enableColors = false;
 
 			scene.add( effect );
+
+			// CAULDRON (static glb — no blob interaction)
+
+			const loader = new GLTFLoader();
+			loader.load( 'cauldron.glb', ( gltf ) => {
+
+				const cauldron = gltf.scene;
+
+				// auto-fit: measure native size, scale to target
+				const box = new THREE.Box3().setFromObject( cauldron );
+				const size = box.getSize( new THREE.Vector3() );
+				const center = box.getCenter( new THREE.Vector3() );
+				const maxDim = Math.max( size.x, size.y, size.z );
+
+				const TARGET = 400;                 // world size of biggest axis
+				const s = TARGET / maxDim;
+				cauldron.scale.setScalar( s );
+
+				// sit cauldron BELOW blobs as a base: center x/z, drop so its top ~ y -100
+				const TOP_Y = - 100;                // world y where cauldron top sits
+				const halfH = ( size.y * s ) / 2;
+				cauldron.position.set(
+					- center.x * s,
+					TOP_Y - halfH - center.y * s,
+					- center.z * s
+				);
+
+				scene.add( cauldron );
+
+			} );
 
 			// RENDERER
 
