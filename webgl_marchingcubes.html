@@ -51,7 +51,7 @@
 
 		// fixed sim values (were GUI sliders)
 		const NUM_BLOBS = 10;
-		const RESOLUTION = 28;
+		const RESOLUTION = 50;
 		const ISOLATION = 80;
 		const SPEED = 1.0;
 		const FLOOR = true;
@@ -72,7 +72,17 @@
 			// SCENE
 
 			scene = new THREE.Scene();
-			scene.background = new THREE.Color( 0x050505 );
+			scene.background = new THREE.Color( 0x15012b );
+			scene.fog = new THREE.Fog( 0x15012b, 4200, 7000 );
+
+			// live tweak from devtools console
+			window.scene = scene;
+			window.fog = scene.fog;
+			// setBg('#15012b') sets background + fog color together
+			window.setBg = ( hex ) => {
+				scene.background.set( hex );
+				scene.fog.color.set( hex );
+			};
 
 			// LIGHTS
 
@@ -95,6 +105,8 @@
 			effect = new MarchingCubes( RESOLUTION, material, true, true, 100000 );
 			effect.position.set( 0, 0, 0 );
 			effect.scale.set( 700, 700, 700 );
+
+			window.effect = effect; // blob mesh — color via effect.material.color
 
 			effect.isolation = ISOLATION;
 			effect.enableUvs = false;
