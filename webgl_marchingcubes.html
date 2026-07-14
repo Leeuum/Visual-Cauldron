@@ -7,6 +7,14 @@
 	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 	<style>
 		body { margin: 0; overflow: hidden; }
+
+		/* typographic ASCII overlay — replaces the 3D view (canvas, drawn glyphs) */
+		#ascii {
+			position: fixed;
+			inset: 0;
+			pointer-events: none;     /* let orbit controls get the mouse */
+			z-index: 10;
+		}
 	</style>
 </head>
 
@@ -58,8 +66,6 @@
 
 		const clock = new THREE.Clock();
 
-		init();
-
 		function init() {
 
 			container = document.getElementById( 'container' );
@@ -73,15 +79,11 @@
 
 			scene = new THREE.Scene();
 			scene.background = new THREE.Color( 0x15012b );
-			scene.fog = new THREE.Fog( 0x15012b, 4200, 7000 );
 
 			// live tweak from devtools console
 			window.scene = scene;
-			window.fog = scene.fog;
-			// setBg('#15012b') sets background + fog color together
 			window.setBg = ( hex ) => {
 				scene.background.set( hex );
-				scene.fog.color.set( hex );
 			};
 
 			// LIGHTS
@@ -159,11 +161,187 @@
 			controls.target.set( 40, - 440, 19 );
 			controls.update();
 
+			// TYPOGRAPHIC ASCII ENGINE (samples the WebGL canvas -> glyphs)
+
+			buildAsciiEngine();
+
 			// EVENTS
 
 			window.addEventListener( 'resize', onWindowResize );
 
 		}
+
+		// ---- Typographic ASCII engine ----------------------------------------
+		// Reads the rendered WebGL frame, downsamples it to a small brightness
+		// grid, and maps each cell to a real font glyph chosen to match both the
+		// ink density AND the target cell width (the "typographic" trick).
+
+		const CHARSET = " .,:;!+-=*#@%&abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+		const WEIGHTS = [ 300, 500, 800 ];
+		const STYLES = [ "normal", "italic" ];
+		const PROP_FAMILY = 'Georgia, Palatino, "Times New Roman", serif';
+		const OVERSAMPLE = 1;   // sample NxN canvas pixels per glyph cell
+		const BG = '#15012b';   // match scene bg
+		const FG = '#00ff00';   // match blob green
+
+		// visible output canvas (glyphs drawn here)
+		const asciiCanvas = document.createElement( 'canvas' );
+		asciiCanvas.id = 'ascii';
+		document.body.appendChild( asciiCanvas );
+		const aCtx = asciiCanvas.getContext( '2d' );
+
+		// hidden canvas for measuring glyph ink density
+		const measCanvas = document.createElement( 'canvas' );
+		measCanvas.width = measCanvas.height = 32;
+		const mCtx = measCanvas.getContext( '2d', { willReadFrequently: true } );
+
+		// hidden canvas the WebGL frame gets shrunk into for sampling
+		const sampCanvas = document.createElement( 'canvas' );
+		const spCtx = sampCanvas.getContext( '2d', { willReadFrequently: true } );
+
+		let COLS, ROWS, FONT_SIZE, LINE_HEIGHT, targetCellW;
+		let palette, brightnessLookup;
+		const colorCache = {};   // quantized rgb -> "rgb(r,g,b)" string
+
+		function estimateBrightness( ch, font ) {
+			const size = 32;
+			mCtx.clearRect( 0, 0, size, size );
+			mCtx.font = font;
+			mCtx.fillStyle = '#fff';
+			mCtx.textBaseline = 'middle';
+			mCtx.fillText( ch, 1, size / 2 );
+			const data = mCtx.getImageData( 0, 0, size, size ).data;
+			let sum = 0;
+			for ( let i = 3; i < data.length; i += 4 ) sum += data[ i ];
+			return sum / ( 255 * size * size );
+		}
+
+		function measureWidth( ch, font ) {
+			mCtx.font = font;
+			return mCtx.measureText( ch ).width;
+		}
+
+		function findBest( target ) {
+			let lo = 0, hi = palette.length - 1;
+			while ( lo < hi ) {
+				const mid = ( lo + hi ) >> 1;
+				if ( palette[ mid ].brightness < target ) lo = mid + 1;
+				else hi = mid;
+			}
+			let bestScore = Infinity, best = palette[ lo ];
+			const start = Math.max( 0, lo - 15 );
+			const end = Math.min( palette.length, lo + 15 );
+			for ( let i = start; i < end; i ++ ) {
+				const e = palette[ i ];
+				const bErr = Math.abs( e.brightness - target ) * 2.5;
+				const wErr = Math.abs( e.width - targetCellW ) / targetCellW;
+				const score = bErr + wErr;
+				if ( score < bestScore ) { bestScore = score; best = e; }
+			}
+			return best;
+		}
+
+		function buildAsciiEngine() {
+
+			// grid sized to fill the viewport, cells keep a text-ish aspect
+			COLS = 110;
+			const cellPxW = window.innerWidth / COLS;
+			LINE_HEIGHT = Math.max( 6, Math.round( cellPxW / 0.5 ) );
+			FONT_SIZE = Math.round( LINE_HEIGHT * 0.92 );
+			ROWS = Math.max( 1, Math.floor( window.innerHeight / LINE_HEIGHT ) );
+			targetCellW = cellPxW;
+
+			// size the visible canvas to the viewport
+			asciiCanvas.width = window.innerWidth;
+			asciiCanvas.height = window.innerHeight;
+
+			sampCanvas.width = COLS * OVERSAMPLE;
+			sampCanvas.height = ROWS * OVERSAMPLE;
+
+			// build glyph palette (brightness + width per weight/style variant)
+			palette = [];
+			for ( const style of STYLES ) {
+				for ( const weight of WEIGHTS ) {
+					const font = `${style === 'italic' ? 'italic ' : ''}${weight} ${FONT_SIZE}px ${PROP_FAMILY}`;
+					for ( const ch of CHARSET ) {
+						if ( ch === ' ' ) continue;
+						const width = measureWidth( ch, font );
+						if ( width <= 0 ) continue;
+						const brightness = estimateBrightness( ch, font );
+						palette.push( { char: ch, font, width, brightness } );
+					}
+				}
+			}
+			const maxB = Math.max( ...palette.map( ( e ) => e.brightness ) );
+			if ( maxB > 0 ) for ( const e of palette ) e.brightness /= maxB;
+			palette.sort( ( a, b ) => a.brightness - b.brightness );
+
+			// precompute brightness byte -> { char, font, alpha } (null = blank)
+			brightnessLookup = [];
+			for ( let byte = 0; byte < 256; byte ++ ) {
+				const brightness = byte / 255;
+				if ( brightness < 0.03 ) { brightnessLookup.push( null ); continue; }
+				const m = findBest( brightness );
+				const alpha = Math.max( 0.1, Math.min( 1, Math.round( brightness * 10 ) / 10 ) );
+				brightnessLookup.push( { char: m.char, font: m.font, alpha } );
+			}
+		}
+
+		function updateAscii() {
+			const w = sampCanvas.width, h = sampCanvas.height;
+			// shrink the current WebGL frame into the sampling canvas
+			spCtx.drawImage( renderer.domElement, 0, 0, w, h );
+			const data = spCtx.getImageData( 0, 0, w, h ).data;
+
+			// clear to bg, set up glyph drawing state
+			aCtx.fillStyle = BG;
+			aCtx.fillRect( 0, 0, asciiCanvas.width, asciiCanvas.height );
+			aCtx.textAlign = 'center';
+			aCtx.textBaseline = 'middle';
+
+			let lastFont = '', lastAlpha = -1, lastColor = '';
+			const halfCellW = targetCellW / 2;
+			const halfLine = LINE_HEIGHT / 2;
+
+			for ( let r = 0; r < ROWS; r ++ ) {
+				const y = r * LINE_HEIGHT + halfLine;
+				for ( let c = 0; c < COLS; c ++ ) {
+					// average RGB over the oversample block
+					let sr = 0, sg = 0, sb = 0;
+					for ( let sy = 0; sy < OVERSAMPLE; sy ++ ) {
+						const py = r * OVERSAMPLE + sy;
+						for ( let sx = 0; sx < OVERSAMPLE; sx ++ ) {
+							const px = c * OVERSAMPLE + sx;
+							const i = ( py * w + px ) * 4;
+							sr += data[ i ]; sg += data[ i + 1 ]; sb += data[ i + 2 ];
+						}
+					}
+					const n = OVERSAMPLE * OVERSAMPLE;
+					const rr = sr / n, gg = sg / n, bb = sb / n;
+					const lum = 0.2126 * rr + 0.7152 * gg + 0.0722 * bb;
+					const byte = Math.min( 255, lum | 0 );
+					const entry = brightnessLookup[ byte ];
+					if ( entry === null ) continue;   // blank cell, skip draw
+
+					// boost pixel to full brightness -> pure material hue
+					const mx = Math.max( rr, gg, bb ) || 1;
+					const s = 255 / mx;
+					// quantize to 5 bits/channel so fillStyle strings cache well
+					const cr = ( rr * s ) & 0xf8, cg = ( gg * s ) & 0xf8, cb = ( bb * s ) & 0xf8;
+					const color = colorCache[ ( cr << 16 ) | ( cg << 8 ) | cb ] ||
+						( colorCache[ ( cr << 16 ) | ( cg << 8 ) | cb ] = `rgb(${cr},${cg},${cb})` );
+
+					if ( entry.font !== lastFont ) { aCtx.font = entry.font; lastFont = entry.font; }
+					if ( entry.alpha !== lastAlpha ) { aCtx.globalAlpha = entry.alpha; lastAlpha = entry.alpha; }
+					if ( color !== lastColor ) { aCtx.fillStyle = color; lastColor = color; }
+					aCtx.fillText( entry.char, c * targetCellW + halfCellW, y );
+				}
+			}
+			aCtx.globalAlpha = 1;
+		}
+
+		// kick everything off (after all declarations exist — avoids TDZ)
+		init();
 
 		//
 
@@ -173,6 +351,8 @@
 			camera.updateProjectionMatrix();
 
 			renderer.setSize( window.innerWidth, window.innerHeight );
+
+			buildAsciiEngine();
 
 		}
 
@@ -242,6 +422,9 @@
 			// render
 
 			renderer.render( scene, camera );
+
+			// sample the frame we just drew and turn it into glyphs
+			updateAscii();
 
 			stats.update();
 
