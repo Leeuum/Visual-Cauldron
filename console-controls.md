@@ -1,21 +1,25 @@
 # Console Controls
 
-Live-tweak the scene from the browser devtools console (F12 → Console) while viewing the page. Changes apply instantly — no reload. Nothing here is saved; when you like a value, tell Claude to bake it into `webgl_marchingcubes.html`.
+Live-tweak the scene from the browser devtools console (F12 → Console) while viewing the page. Changes apply instantly — no reload. Nothing here is saved; when you like a value, tell Claude to bake it into `master.html`.
 
 Colors are RGB hex, **6 digits only** (`#RRGGBB`). No 8-digit / alpha (`#RRGGBBAA` errors).
 
-## Background + Fog
+## Background
+
+The visible background is the **ASCII overlay** background, not the WebGL scene. The scene bg sits *under* the overlay and is painted over every frame — so it's basically invisible.
 
 ```js
-setBg('#0D0019')     // set background AND fog color together
-scene.background.set('#000000')   // background only (fog unchanged)
-
-fog.color.set('#0D0019')   // fog color only
-fog.near = 4600      // distance where fog starts — bigger = LESS fog
-fog.far  = 6000      // distance where fully fogged — smaller = MORE fog
+setAsciiBg('#000000')   // the REAL background (what you actually see)
 ```
 
-Camera sits ~4900 units out. Blobs live roughly 4200–5600 away, so useful fog range is near ~4000, far ~7000.
+The old `setBg` / `scene.background` set the hidden WebGL bg — leave them unless you know you want the under-layer.
+
+```js
+setBg('#0D0019')     // hidden WebGL bg (not the visible bg)
+scene.background.set('#000000')   // same thing, direct
+```
+
+Camera sits ~4900 units out. Blobs live roughly 4200–5600 away.
 
 ## Blobs
 
@@ -48,4 +52,4 @@ cauldronLights.forEach(l => l.intensity = 800)  // all at once
 
 - `.set()` takes hex string `'#ff0000'`, hex number `0xff0000`, or name `'red'`.
 - Set a light's `.intensity = 0` to mute it while testing others.
-- Everything above hangs off `window`, so you can also inspect e.g. `scene`, `fog`, `effect` directly.
+- Everything above hangs off `window`, so you can also inspect e.g. `scene`, `effect`, `cauldronLights` directly.

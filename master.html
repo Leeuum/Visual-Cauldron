@@ -181,8 +181,11 @@
 		const STYLES = [ "normal", "italic" ];
 		const PROP_FAMILY = 'Georgia, Palatino, "Times New Roman", serif';
 		const OVERSAMPLE = 1;   // sample NxN canvas pixels per glyph cell
-		const BG = '#15012b';   // match scene bg
+		let BG = '#000000';   // ascii overlay background (what you actually see)
 		const FG = '#00ff00';   // match blob green
+
+		// live tweak from devtools console — this is the REAL background
+		window.setAsciiBg = ( hex ) => { BG = hex; };
 
 		// visible output canvas (glyphs drawn here)
 		const asciiCanvas = document.createElement( 'canvas' );
