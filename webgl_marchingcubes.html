@@ -147,6 +147,26 @@
 
 			if ( floor ) object.addPlaneY( 2, 12 );
 
+			// carve floor into a disc — fade field to 0 outside a circle (soft edge)
+			const size = object.size;
+			const half = size / 2;
+			const discR = 0.85;   // disc radius as fraction of half-extent
+			const feather = 0.12;  // soft-edge width
+			for ( let z = 0; z < size; z ++ ) {
+				for ( let x = 0; x < size; x ++ ) {
+					const dx = ( x - half ) / half;
+					const dz = ( z - half ) / half;
+					const dist = Math.sqrt( dx * dx + dz * dz );
+					// 1 inside, 0 outside, smooth across feather band
+					const f = THREE.MathUtils.clamp( ( discR - dist ) / feather, 0, 1 );
+					if ( f < 1 ) {
+						for ( let y = 0; y < size; y ++ ) {
+							object.field[ x + y * size + z * size * size ] *= f;
+						}
+					}
+				}
+			}
+
 			object.update();
 
 		}
