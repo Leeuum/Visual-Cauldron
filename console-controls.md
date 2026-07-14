@@ -39,14 +39,18 @@ light.color.set('#ffffff')   // main directional light
 light.intensity = 0           // currently off (0)
 
 ambientLight.color.set('#323232')  // fill light (whole scene)
-ambientLight.intensity = 3
+ambientLight.intensity = 250
 
 // cauldron's own lights (from Blender), array — count varies:
 cauldronLights                        // list them
 cauldronLights[0].color.set('#ff6600')
-cauldronLights[0].intensity = 500
-cauldronLights.forEach(l => l.intensity = 800)  // all at once
+
+cauldronLights.map(l => Math.round(l.intensity))  // see current values (tens/hundreds of thousands)
+cauldronLights.forEach(l => l.intensity *= 2)     // twice as bright
+cauldronLights.forEach(l => l.intensity *= 0.5)   // half as bright
 ```
+
+**Don't set absolute intensity** (e.g. `= 800`) — these lights use `decay = 2` (inverse-square falloff) and the scene units are huge, so the loaded values are already in the tens/hundreds of thousands. A small absolute number kills them. Work relative (`*= 2`, `*= 0.5`), or check the baseline with `.map` first and set in that ballpark.
 
 ## Tips
 

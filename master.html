@@ -78,7 +78,7 @@
 			// SCENE
 
 			scene = new THREE.Scene();
-			scene.background = new THREE.Color( 0x15012b );
+			scene.background = new THREE.Color( 0x000000 );
 
 			// live tweak from devtools console
 			window.scene = scene;
@@ -92,7 +92,7 @@
 			light.position.set( 0.5, 0.5, 1 );
 			scene.add( light );
 
-			ambientLight = new THREE.AmbientLight( 0x323232, 3 );
+			ambientLight = new THREE.AmbientLight( 0x323232, 250 );
 			scene.add( ambientLight );
 
 			window.light = light;
@@ -134,9 +134,11 @@
 				cauldron.traverse( ( o ) => {
 					if ( o.isLight ) window.cauldronLights.push( o );
 				} );
-				window.cauldronLights.forEach( ( l ) => {
+				// baked tuned intensities (devtools), by load order; falls back to *360 if count differs
+				const CAULDRON_INTENSITIES = [ 156532070, 39133017, 46959621, 23479810 ];
+				window.cauldronLights.forEach( ( l, i ) => {
 					l.decay = 2;
-					l.intensity *= 360;
+					l.intensity = CAULDRON_INTENSITIES[ i ] ?? l.intensity * 360;
 				} );
 				console.log( 'lights found:', window.cauldronLights );
 
@@ -181,7 +183,7 @@
 		const STYLES = [ "normal", "italic" ];
 		const PROP_FAMILY = 'Georgia, Palatino, "Times New Roman", serif';
 		const OVERSAMPLE = 1;   // sample NxN canvas pixels per glyph cell
-		let BG = '#000000';   // ascii overlay background (what you actually see)
+		let BG = '#191919';   // ascii overlay background (what you actually see)
 		const FG = '#00ff00';   // match blob green
 
 		// live tweak from devtools console — this is the REAL background
