@@ -101,24 +101,9 @@
 
 				const cauldron = gltf.scene;
 
-				// auto-fit: measure native size, scale to target
-				const box = new THREE.Box3().setFromObject( cauldron );
-				const size = box.getSize( new THREE.Vector3() );
-				const center = box.getCenter( new THREE.Vector3() );
-				const maxDim = Math.max( size.x, size.y, size.z );
-
-				const TARGET = 400;                 // world size of biggest axis
-				const s = TARGET / maxDim;
-				cauldron.scale.setScalar( s );
-
-				// sit cauldron BELOW blobs as a base: center x/z, drop so its top ~ y -100
-				const TOP_Y = - 100;                // world y where cauldron top sits
-				const halfH = ( size.y * s ) / 2;
-				cauldron.position.set(
-					- center.x * s,
-					TOP_Y - halfH - center.y * s,
-					- center.z * s
-				);
+				// placement baked from devtools tuning
+				cauldron.scale.setScalar( 600 );
+				cauldron.position.set( 0, - 1050, 0 );
 
 				scene.add( cauldron );
 				console.log( 'cauldron.glb loaded ok' );
