@@ -249,7 +249,9 @@
 		function buildAsciiEngine() {
 
 			// grid sized to fill the viewport, cells keep a text-ish aspect
-			COLS = 110;
+			// COLS scales with width so glyph SIZE stays ~constant (more cols when wider, not bigger text)
+			const TARGET_CELL = 9;   // target px per glyph cell — lower = smaller text / more detail
+			COLS = Math.max( 20, Math.round( window.innerWidth / TARGET_CELL ) );
 			const cellPxW = window.innerWidth / COLS;
 			LINE_HEIGHT = Math.max( 6, Math.round( cellPxW / 0.5 ) );
 			FONT_SIZE = Math.round( LINE_HEIGHT * 0.92 );
