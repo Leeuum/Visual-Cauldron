@@ -121,8 +121,12 @@
 				);
 
 				scene.add( cauldron );
+				console.log( 'cauldron.glb loaded ok' );
 
-			} );
+			},
+			undefined,
+			( err ) => console.error( 'cauldron.glb FAILED to load:', err )
+			);
 
 			// RENDERER
 

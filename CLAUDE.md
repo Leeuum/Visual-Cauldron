@@ -20,7 +20,7 @@ No build, no server config needed. Because it uses ES module imports, `file://` 
 
 ```bash
 python3 -m http.server 8000
-# open http://localhost:8000/webgl_marchingcubes.html
+# open http://localhost:8000/cubes.html
 ```
 
 ## Architecture
