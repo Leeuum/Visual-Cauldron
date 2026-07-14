@@ -37,7 +37,7 @@
 
 		let camera, scene, renderer;
 
-		let light, pointLight, ambientLight;
+		let light, ambientLight;
 
 		let effect;
 
@@ -73,10 +73,6 @@
 			light = new THREE.DirectionalLight( 0xffffff, 3 );
 			light.position.set( 0.5, 0.5, 1 );
 			scene.add( light );
-
-			pointLight = new THREE.PointLight( 0xff7c00, 3, 0, 0 );
-			pointLight.position.set( 0, 0, 100 );
-			scene.add( pointLight );
 
 			ambientLight = new THREE.AmbientLight( 0x323232, 3 );
 			scene.add( ambientLight );
