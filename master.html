@@ -46,6 +46,7 @@
 
 		const stats = new Stats();
 		document.body.appendChild( stats.dom );
+		stats.dom.style.display = 'none';   // hidden by default — press F to show
 
 		let container;
 
@@ -73,7 +74,7 @@
 			// CAMERA
 
 			camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 10000 );
-			camera.position.set( - 51, 167, 4864 );
+			camera.position.set( - 1, 465, 3334 );
 
 			// SCENE
 
@@ -160,8 +161,19 @@
 			controls = new OrbitControls( camera, renderer.domElement );
 			controls.minDistance = 500;
 			controls.maxDistance = 5000;
-			controls.target.set( 40, - 440, 19 );
+			controls.target.set( 40, - 582, 37 );
 			controls.update();
+
+			// live tweak from devtools console — camInfo() prints paste-ready coords
+			window.camera = camera;
+			window.controls = controls;
+			window.camInfo = () => {
+				const p = camera.position, t = controls.target;
+				console.log(
+					`camera.position.set( ${Math.round(p.x)}, ${Math.round(p.y)}, ${Math.round(p.z)} );\n` +
+					`controls.target.set( ${Math.round(t.x)}, ${Math.round(t.y)}, ${Math.round(t.z)} );`
+				);
+			};
 
 			// TYPOGRAPHIC ASCII ENGINE (samples the WebGL canvas -> glyphs)
 
@@ -186,6 +198,23 @@
 		let BG = '#191919';   // ascii overlay background (what you actually see)
 		const FG = '#00ff00';   // match blob green
 
+		// --- phrase mode: the lit blob is spelled out of the company name ---
+		// bright cells emit the next letter of PHRASE in reading order (looping);
+		// dim fringe cells use SHADE_CHARS punctuation for texture. flowMode:
+		//   'scroll' = phrase stirs through the blob (animated, default)
+		//   'static' = letters pinned to cells, reads like a page
+		//   'off'    = original brightness-matched ASCII (no phrase)
+		const PHRASE = '|VISUA|CAULDRON';
+		const SHADE_CHARS = '.,:;-~+={}[]?/!"£$%^&*()"';   // dim-fringe shading glyphs
+		const LETTER_BRIGHT = 0.35;   // >= this brightness -> phrase letter, else shading
+		let SCROLL_SPEED = 10;   // phrase drift speed in 'scroll' mode (higher=faster, 0=frozen)
+		let GLYPH_SCALE = 0.78;   // glyph size vs cell (lower = more gap between letters, less overlap)
+		let flowMode = 'scroll';
+		// switch live: setFlow('static'|'scroll'|'off'), setScrollSpeed(n), setGlyphScale(n), or press M to cycle
+		window.setFlow = ( m ) => { if ( [ 'off', 'static', 'scroll' ].includes( m ) ) flowMode = m; };
+		window.setScrollSpeed = ( v ) => { SCROLL_SPEED = v; };
+		window.setGlyphScale = ( v ) => { GLYPH_SCALE = v; buildAsciiEngine(); };
+
 		// live tweak from devtools console — this is the REAL background
 		window.setAsciiBg = ( hex ) => { BG = hex; };
 
@@ -197,7 +226,7 @@
 
 		// hidden canvas for measuring glyph ink density
 		const measCanvas = document.createElement( 'canvas' );
-		measCanvas.width = measCanvas.height = 32;
+		measCanvas.width = measCanvas.height = 32
 		const mCtx = measCanvas.getContext( '2d', { willReadFrequently: true } );
 
 		// hidden canvas the WebGL frame gets shrunk into for sampling
@@ -208,8 +237,8 @@
 
 		// font size (px per glyph cell) tracks camera distance to world centre:
 		// zoomed in (near) -> big glyphs, zoomed out (far) -> small glyphs
-		const CELL_MIN = 5;    // smallest glyph cell (camera far)
-		const CELL_MAX = 25;   // biggest glyph cell (camera near)
+		const CELL_MIN = 7;    // smallest glyph cell (camera far)
+		const CELL_MAX = 14;   // biggest glyph cell (camera near)
 		let currentCell = CELL_MIN;   // last-built cell size (rebuild only when it changes)
 
 		function cellForCamera() {
@@ -221,6 +250,7 @@
 			return Math.round( CELL_MAX - clamped * ( CELL_MAX - CELL_MIN ) );
 		}
 		let palette, brightnessLookup;
+		let letterLookup, shadeLookup, letterCutoffByte;   // phrase-mode lookups
 		const colorCache = {};   // quantized rgb -> "rgb(r,g,b)" string
 
 		function estimateBrightness( ch, font ) {
@@ -269,7 +299,7 @@
 			COLS = Math.max( 20, Math.round( window.innerWidth / currentCell ) );
 			const cellPxW = window.innerWidth / COLS;
 			LINE_HEIGHT = Math.max( 6, Math.round( cellPxW / 0.5 ) );
-			FONT_SIZE = Math.round( LINE_HEIGHT * 0.92 );
+			FONT_SIZE = Math.round( LINE_HEIGHT * 0.92 * GLYPH_SCALE );
 			ROWS = Math.max( 1, Math.floor( window.innerHeight / LINE_HEIGHT ) );
 			targetCellW = cellPxW;
 
@@ -307,6 +337,47 @@
 				const alpha = Math.max( 0.1, Math.min( 1, Math.round( brightness * 10 ) / 10 ) );
 				brightnessLookup.push( { char: m.char, font: m.font, alpha } );
 			}
+
+			// --- phrase-mode lookups ---
+			// shading glyphs for the dim fringe, width-matched like the main palette
+			const shadePalette = [];
+			for ( const style of STYLES ) {
+				for ( const weight of WEIGHTS ) {
+					const font = `${style === 'italic' ? 'italic ' : ''}${weight} ${FONT_SIZE}px ${PROP_FAMILY}`;
+					for ( const ch of SHADE_CHARS ) {
+						const width = measureWidth( ch, font );
+						if ( width <= 0 ) continue;
+						const brightness = estimateBrightness( ch, font );
+						shadePalette.push( { char: ch, font, width, brightness } );
+					}
+				}
+			}
+			const shadeMaxB = Math.max( ...shadePalette.map( ( e ) => e.brightness ) );
+			if ( shadeMaxB > 0 ) for ( const e of shadePalette ) e.brightness /= shadeMaxB;
+
+			// phrase letters get heavier weight as the cell brightens (dim->light, bright->bold)
+			const letterFonts = WEIGHTS.map( ( w ) => `${w} ${FONT_SIZE}px ${PROP_FAMILY}` );
+			letterCutoffByte = Math.round( LETTER_BRIGHT * 255 );
+
+			letterLookup = [];
+			shadeLookup = [];
+			for ( let byte = 0; byte < 256; byte ++ ) {
+				const brightness = byte / 255;
+				if ( brightness < 0.03 ) { letterLookup.push( null ); shadeLookup.push( null ); continue; }
+				const alpha = Math.max( 0.1, Math.min( 1, Math.round( brightness * 10 ) / 10 ) );
+				// letter weight ramps across the bright band
+				const t = Math.max( 0, ( brightness - LETTER_BRIGHT ) / ( 1 - LETTER_BRIGHT ) );
+				const wi = Math.min( letterFonts.length - 1, Math.floor( t * letterFonts.length ) );
+				letterLookup.push( { font: letterFonts[ wi ], alpha } );
+				// nearest shading glyph by brightness + cell width
+				let best = shadePalette[ 0 ], bestScore = Infinity;
+				for ( const e of shadePalette ) {
+					const score = Math.abs( e.brightness - brightness ) * 2.5
+						+ Math.abs( e.width - targetCellW ) / targetCellW;
+					if ( score < bestScore ) { bestScore = score; best = e; }
+				}
+				shadeLookup.push( best ? { char: best.char, font: best.font, alpha } : null );
+			}
 		}
 
 		function updateAscii() {
@@ -324,6 +395,10 @@
 			let lastFont = '', lastAlpha = -1, lastColor = '';
 			const halfCellW = targetCellW / 2;
 			const halfLine = LINE_HEIGHT / 2;
+			// letters are pinned to grid POSITION (not a running count), so a cell
+			// always shows the same letter — the blob morphing reveals/hides letters
+			// instead of reshuffling them. scroll drifts the whole ribbon over time.
+			const scroll = flowMode === 'scroll' ? Math.floor( time * SCROLL_SPEED ) : 0;
 
 			for ( let r = 0; r < ROWS; r ++ ) {
 				const y = r * LINE_HEIGHT + halfLine;
@@ -342,8 +417,22 @@
 					const rr = sr / n, gg = sg / n, bb = sb / n;
 					const lum = 0.2126 * rr + 0.7152 * gg + 0.0722 * bb;
 					const byte = Math.min( 255, lum | 0 );
-					const entry = brightnessLookup[ byte ];
-					if ( entry === null ) continue;   // blank cell, skip draw
+
+					// pick the glyph: phrase letter, shading punctuation, or original ASCII
+					let gChar, gFont, gAlpha;
+					if ( flowMode === 'off' ) {
+						const entry = brightnessLookup[ byte ];
+						if ( entry === null ) continue;   // blank cell, skip draw
+						gChar = entry.char; gFont = entry.font; gAlpha = entry.alpha;
+					} else if ( byte >= letterCutoffByte ) {
+						const L = letterLookup[ byte ];   // never null above cutoff
+						gChar = PHRASE[ ( r * COLS + c + scroll ) % PHRASE.length ];
+						gFont = L.font; gAlpha = L.alpha;
+					} else {
+						const S = shadeLookup[ byte ];
+						if ( S === null ) continue;   // blank fringe, skip draw
+						gChar = S.char; gFont = S.font; gAlpha = S.alpha;
+					}
 
 					// boost pixel to full brightness -> pure material hue
 					const mx = Math.max( rr, gg, bb ) || 1;
@@ -353,10 +442,10 @@
 					const color = colorCache[ ( cr << 16 ) | ( cg << 8 ) | cb ] ||
 						( colorCache[ ( cr << 16 ) | ( cg << 8 ) | cb ] = `rgb(${cr},${cg},${cb})` );
 
-					if ( entry.font !== lastFont ) { aCtx.font = entry.font; lastFont = entry.font; }
-					if ( entry.alpha !== lastAlpha ) { aCtx.globalAlpha = entry.alpha; lastAlpha = entry.alpha; }
+					if ( gFont !== lastFont ) { aCtx.font = gFont; lastFont = gFont; }
+					if ( gAlpha !== lastAlpha ) { aCtx.globalAlpha = gAlpha; lastAlpha = gAlpha; }
 					if ( color !== lastColor ) { aCtx.fillStyle = color; lastColor = color; }
-					aCtx.fillText( entry.char, c * targetCellW + halfCellW, y );
+					aCtx.fillText( gChar, c * targetCellW + halfCellW, y );
 				}
 			}
 			aCtx.globalAlpha = 1;
@@ -426,6 +515,18 @@
 		}
 
 		//
+
+		// press M to cycle phrase flow: scroll -> static -> off -> scroll
+		window.addEventListener( 'keydown', ( e ) => {
+			if ( e.key === 'm' || e.key === 'M' ) {
+				const order = [ 'scroll', 'static', 'off' ];
+				flowMode = order[ ( order.indexOf( flowMode ) + 1 ) % order.length ];
+				console.log( 'flowMode:', flowMode );
+			}
+			if ( e.key === 'f' || e.key === 'F' ) {
+				stats.dom.style.display = stats.dom.style.display === 'none' ? '' : 'none';
+			}
+		} );
 
 		function animate() {
 

@@ -21,6 +21,23 @@ scene.background.set('#000000')   // same thing, direct
 
 Camera sits ~4900 units out. Blobs live roughly 4200–5600 away.
 
+## Phrase overlay (Visual Cauldron text)
+
+The blob is spelled out of the word `VISUALCAULDRON` (looping). Bright cells = phrase letters, dim fringe = punctuation shading.
+
+```js
+setFlow('scroll')     // phrase drifts through the blob (animated, default)
+setFlow('static')     // letters pinned to the grid, reads like a page
+setFlow('off')        // original brightness-matched ASCII, no phrase
+
+setScrollSpeed(0.6)   // drift speed in 'scroll' mode (higher=faster, 0=frozen)
+setGlyphScale(0.78)   // glyph size vs cell (lower = more gap, less overlap); rebuilds instantly
+```
+
+Press **M** to cycle `scroll → static → off`.
+
+Note: the phrase text, brightness cutoff for letter-vs-shading (`LETTER_BRIGHT`), and shading charset (`SHADE_CHARS`) are fixed consts in the file — ask Claude to change those.
+
 ## Blobs
 
 ```js
