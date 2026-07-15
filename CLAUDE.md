@@ -37,10 +37,9 @@ Do NOT open the `.html` by double-clicking (that's `file://`). Use the `http://`
 
 ## Live tweaking from the console
 
-`window.light`, `window.ambientLight`, `window.cauldronLights`, plus `scene`, `fog`, `effect`, and a `setBg()` helper are exposed on `window` so values can be tuned live in the browser devtools console — no reload. **`console-controls.md`** is the reference sheet (background/fog, blob material, lights). Workflow: tweak live, then tell Claude the value to bake into `master.html`.
+`window.light`, `window.ambientLight`, `window.cauldronLights`, plus `scene`, `effect`, and helpers `setBg()` / `setAsciiBg()` are exposed on `window` so values can be tuned live in the browser devtools console — no reload. Note: `setBg()` sets the WebGL `scene.background`, which is hidden under the ASCII overlay; `setAsciiBg()` sets `BG`, the overlay color you **actually see**. **`console-controls.md`** is the reference sheet (background, blob material, lights). Workflow: tweak live, then tell Claude the value to bake into `master.html`.
 
 ## Other files (not part of the app)
 
 - **`webgl_effects_ascii.html`** — the stock three.js AsciiEffect example, kept as reference. Its import map points at local `../build/` / `./jsm/` paths that don't exist here, so it won't run in this repo as-is.
-- **`variable-typographic-ascii-*.js`** — a large (~126 KB) downloaded reference lib (bidi/Unicode data), imported by nothing. Scratch material from ASCII experiments; safe to ignore.
 - **`help`** — plain-text reminder of the serve-over-HTTP rule (mirrors the Running section above).

@@ -49,7 +49,7 @@
 
 		let container;
 
-		let camera, scene, renderer;
+		let camera, scene, renderer, controls;
 
 		let light, ambientLight;
 
@@ -157,7 +157,7 @@
 
 			// CONTROLS (camera orbit)
 
-			const controls = new OrbitControls( camera, renderer.domElement );
+			controls = new OrbitControls( camera, renderer.domElement );
 			controls.minDistance = 500;
 			controls.maxDistance = 5000;
 			controls.target.set( 40, - 440, 19 );
@@ -205,6 +205,21 @@
 		const spCtx = sampCanvas.getContext( '2d', { willReadFrequently: true } );
 
 		let COLS, ROWS, FONT_SIZE, LINE_HEIGHT, targetCellW;
+
+		// font size (px per glyph cell) tracks camera distance to world centre:
+		// zoomed in (near) -> big glyphs, zoomed out (far) -> small glyphs
+		const CELL_MIN = 5;    // smallest glyph cell (camera far)
+		const CELL_MAX = 25;   // biggest glyph cell (camera near)
+		let currentCell = CELL_MIN;   // last-built cell size (rebuild only when it changes)
+
+		function cellForCamera() {
+			if ( ! controls ) return CELL_MIN;
+			const t = ( camera.position.distanceTo( controls.target ) - controls.minDistance )
+				/ ( controls.maxDistance - controls.minDistance );
+			const clamped = Math.max( 0, Math.min( 1, t ) );
+			// near (t=0) -> CELL_MAX, far (t=1) -> CELL_MIN
+			return Math.round( CELL_MAX - clamped * ( CELL_MAX - CELL_MIN ) );
+		}
 		let palette, brightnessLookup;
 		const colorCache = {};   // quantized rgb -> "rgb(r,g,b)" string
 
@@ -250,8 +265,8 @@
 
 			// grid sized to fill the viewport, cells keep a text-ish aspect
 			// COLS scales with width so glyph SIZE stays ~constant (more cols when wider, not bigger text)
-			const TARGET_CELL = 6;   // target px per glyph cell — lower = smaller text / more detail
-			COLS = Math.max( 20, Math.round( window.innerWidth / TARGET_CELL ) );
+			currentCell = cellForCamera();   // px per glyph cell — driven by camera zoom
+			COLS = Math.max( 20, Math.round( window.innerWidth / currentCell ) );
 			const cellPxW = window.innerWidth / COLS;
 			LINE_HEIGHT = Math.max( 6, Math.round( cellPxW / 0.5 ) );
 			FONT_SIZE = Math.round( LINE_HEIGHT * 0.92 );
@@ -429,6 +444,9 @@
 			// render
 
 			renderer.render( scene, camera );
+
+			// rebuild glyph palette only when camera zoom crosses to a new cell size
+			if ( cellForCamera() !== currentCell ) buildAsciiEngine();
 
 			// sample the frame we just drew and turn it into glyphs
 			updateAscii();
