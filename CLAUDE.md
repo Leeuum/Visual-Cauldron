@@ -20,14 +20,14 @@ No build, no server config needed. Because it uses ES module imports, `file://` 
 
 ```bash
 python3 -m http.server 8000
-# open http://127.0.0.1:8000/master.html
+# open http://127.0.0.1:8000/index.html
 ```
 
 Do NOT open the `.html` by double-clicking (that's `file://`). Use the `http://` URL. (Same note lives in the `help` file.)
 
 ## Architecture
 
-- **`master.html`** — the whole app. `<script type="module">` with an `importmap` pointing `three` + `three/addons/` at jsdelivr. Marching-cubes metaball ("blob") field animated in a render loop; `OrbitControls` for camera; `cauldron.glb` loaded as a static base mesh. Sim params were once GUI sliders, now fixed consts at the top of the module (`NUM_BLOBS`, `RESOLUTION`, `ISOLATION`, `SPEED`, `FLOOR`).
+- **`index.html`** — the whole app. `<script type="module">` with an `importmap` pointing `three` + `three/addons/` at jsdelivr. Marching-cubes metaball ("blob") field animated in a render loop; `OrbitControls` for camera; `cauldron.glb` loaded as a static base mesh. Sim params were once GUI sliders, now fixed consts at the top of the module (`NUM_BLOBS`, `RESOLUTION`, `ISOLATION`, `SPEED`, `FLOOR`).
   - `updateCubes()` is where the visual content lives — resets the voxel field each frame and re-adds metaballs (`addBall`) driven by sin/cos of `time`. Edit blob motion/count here. Also carves the floor into a **soft-edged disc** by fading `object.field[]` to 0 outside a circle (`discR`, `feather`).
   - `init()` sets up camera, lights, material (matte green `MeshPhongMaterial`), the `MarchingCubes` effect, loads the cauldron, renderer, controls, a `Stats` FPS meter. Camera/target positions are baked-in magic numbers from devtools tuning — don't "clean them up."
   - **Typographic ASCII engine** (`buildAsciiEngine()` / `updateAscii()` + `estimateBrightness`/`measureWidth`/`findBest`): each frame it shrinks the WebGL canvas into a small sampling canvas, reads per-cell brightness, and paints a real font glyph into each cell of a 2D overlay canvas (`#ascii`, drawn on top). The "typographic" trick: glyphs are chosen to match BOTH ink density AND target cell width, picked from a `palette` built over `CHARSET` × `WEIGHTS` × `STYLES` (serif font). Tuning consts live at the top of the engine block — `CHARSET`, `WEIGHTS`, `STYLES`, `PROP_FAMILY`, `COLS` (grid width, in `buildAsciiEngine`), `BG`/`FG` colors. Rebuilt on resize.
@@ -37,7 +37,7 @@ Do NOT open the `.html` by double-clicking (that's `file://`). Use the `http://`
 
 ## Live tweaking from the console
 
-`window.light`, `window.ambientLight`, `window.cauldronLights`, plus `scene`, `effect`, and helpers `setBg()` / `setAsciiBg()` are exposed on `window` so values can be tuned live in the browser devtools console — no reload. Note: `setBg()` sets the WebGL `scene.background`, which is hidden under the ASCII overlay; `setAsciiBg()` sets `BG`, the overlay color you **actually see**. **`console-controls.md`** is the reference sheet (background, blob material, lights). Workflow: tweak live, then tell Claude the value to bake into `master.html`.
+`window.light`, `window.ambientLight`, `window.cauldronLights`, plus `scene`, `effect`, and helpers `setBg()` / `setAsciiBg()` are exposed on `window` so values can be tuned live in the browser devtools console — no reload. Note: `setBg()` sets the WebGL `scene.background`, which is hidden under the ASCII overlay; `setAsciiBg()` sets `BG`, the overlay color you **actually see**. **`console-controls.md`** is the reference sheet (background, blob material, lights). Workflow: tweak live, then tell Claude the value to bake into `index.html`.
 
 ## Other files (not part of the app)
 
