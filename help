@@ -1,8 +1,0 @@
-remember:
-start server with 
-
-python3 -m http.server 8000
-
-DO NOT open .html file by clicking, go to:
-
-http://127.0.0.1:8000/webgl_marchingcubes.html
