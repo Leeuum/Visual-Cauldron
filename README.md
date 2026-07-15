@@ -7,7 +7,7 @@ A 3D cauldron with a bubbling metaball "brew" rendered in WebGL, then redrawn ev
 ## Built with
 
 - [three.js](https://threejs.org/) — WebGL scene, marching-cubes blobs, orbit camera
-- A custom canvas ASCII engine that samples each frame and paints font glyphs to match brightness
+- A custom canvas ASCII engine that samples each frame and paints font glyphs to match brightness — the typographic approach was inspired by [chenglou/pretext](https://github.com/chenglou/pretext), then heavily reworked (phrase-spelling, weight/width matching, live controls)
 
 ## Running locally
 
