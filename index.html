@@ -3,6 +3,7 @@
 <head>
 	<title>Visual Cauldron</title>
 	<link rel="icon" href="data:,">
+	<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 	<style>
@@ -34,6 +35,12 @@
 			}
 		} );
 		document.currentScript.after( importmap );
+
+		// start fetching the big three.js module immediately (before the module script parses)
+		const preload = document.createElement( 'link' );
+		preload.rel = 'modulepreload';
+		preload.href = `https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/build/three.module.js`;
+		document.head.appendChild( preload );
 	</script>
 
 	<script type="module">
@@ -149,10 +156,14 @@
 			);
 
 			// RENDERER
+			// The WebGL frame is never shown — only sampled by the ascii engine —
+			// so the buffer is kept tiny (grid × RENDER_SS, set in buildAsciiEngine).
+			// CSS stretches the canvas over the viewport so OrbitControls still
+			// receives mouse events across the whole window.
 
-			renderer = new THREE.WebGLRenderer();
-			renderer.setPixelRatio( window.devicePixelRatio );
-			renderer.setSize( window.innerWidth, window.innerHeight );
+			renderer = new THREE.WebGLRenderer( { powerPreference: 'high-performance' } );
+			renderer.domElement.style.width = '100vw';
+			renderer.domElement.style.height = '100vh';
 			renderer.setAnimationLoop( animate );
 			container.appendChild( renderer.domElement );
 
@@ -222,7 +233,7 @@
 		const asciiCanvas = document.createElement( 'canvas' );
 		asciiCanvas.id = 'ascii';
 		document.body.appendChild( asciiCanvas );
-		const aCtx = asciiCanvas.getContext( '2d' );
+		const aCtx = asciiCanvas.getContext( '2d', { alpha: false } );   // opaque = cheaper compositing
 
 		// hidden canvas for measuring glyph ink density
 		const measCanvas = document.createElement( 'canvas' );
@@ -252,6 +263,10 @@
 		let palette, brightnessLookup;
 		let letterLookup, shadeLookup, letterCutoffByte;   // phrase-mode lookups
 		const colorCache = {};   // quantized rgb -> "rgb(r,g,b)" string
+
+		const RENDER_SS = 3;      // WebGL pixels rendered per ascii cell (buffer = grid × this)
+		const engineCache = {};   // zoom-cell|viewport|scale -> prebuilt lookups (no rebuild hitch on zoom)
+		let spriteCache;          // font|color|char -> pre-drawn glyph canvas (blit beats fillText)
 
 		function estimateBrightness( ch, font ) {
 			const size = 32;
@@ -309,6 +324,18 @@
 
 			sampCanvas.width = COLS * OVERSAMPLE;
 			sampCanvas.height = ROWS * OVERSAMPLE;
+
+			// size the (hidden) WebGL buffer to just what the sampler needs —
+			// aspect doesn't matter, every stage is a full-rect stretch
+			if ( renderer ) renderer.setSize( COLS * RENDER_SS, ROWS * RENDER_SS, false );
+
+			// reuse a previously built engine for this zoom level / viewport
+			const cacheKey = `${currentCell}|${window.innerWidth}x${window.innerHeight}|${GLYPH_SCALE}`;
+			const cached = engineCache[ cacheKey ];
+			if ( cached ) {
+				( { palette, brightnessLookup, letterLookup, shadeLookup, letterCutoffByte, spriteCache } = cached );
+				return;
+			}
 
 			// build glyph palette (brightness + width per weight/style variant)
 			palette = [];
@@ -378,6 +405,29 @@
 				}
 				shadeLookup.push( best ? { char: best.char, font: best.font, alpha } : null );
 			}
+
+			spriteCache = new Map();
+			engineCache[ cacheKey ] = { palette, brightnessLookup, letterLookup, shadeLookup, letterCutoffByte, spriteCache };
+		}
+
+		// pre-rendered glyph sprite — rasterise each font|color|char once, then blit.
+		// drawImage of a tiny canvas is several times cheaper than fillText per cell.
+		function glyphSprite( ch, font, color ) {
+			const key = font + '|' + color + '|' + ch;
+			let s = spriteCache.get( key );
+			if ( s === undefined ) {
+				s = document.createElement( 'canvas' );
+				s.width = Math.ceil( targetCellW * 2 );    // 2x cell: room for italic overhang
+				s.height = Math.ceil( LINE_HEIGHT * 2 );
+				const g = s.getContext( '2d' );
+				g.font = font;
+				g.textAlign = 'center';
+				g.textBaseline = 'middle';
+				g.fillStyle = color;
+				g.fillText( ch, s.width / 2, s.height / 2 );
+				spriteCache.set( key, s );
+			}
+			return s;
 		}
 
 		function updateAscii() {
@@ -386,13 +436,11 @@
 			spCtx.drawImage( renderer.domElement, 0, 0, w, h );
 			const data = spCtx.getImageData( 0, 0, w, h ).data;
 
-			// clear to bg, set up glyph drawing state
+			// clear to bg
 			aCtx.fillStyle = BG;
 			aCtx.fillRect( 0, 0, asciiCanvas.width, asciiCanvas.height );
-			aCtx.textAlign = 'center';
-			aCtx.textBaseline = 'middle';
 
-			let lastFont = '', lastAlpha = -1, lastColor = '';
+			let lastAlpha = -1;
 			const halfCellW = targetCellW / 2;
 			const halfLine = LINE_HEIGHT / 2;
 			// letters are pinned to grid POSITION (not a running count), so a cell
@@ -442,10 +490,12 @@
 					const color = colorCache[ ( cr << 16 ) | ( cg << 8 ) | cb ] ||
 						( colorCache[ ( cr << 16 ) | ( cg << 8 ) | cb ] = `rgb(${cr},${cg},${cb})` );
 
-					if ( gFont !== lastFont ) { aCtx.font = gFont; lastFont = gFont; }
 					if ( gAlpha !== lastAlpha ) { aCtx.globalAlpha = gAlpha; lastAlpha = gAlpha; }
-					if ( color !== lastColor ) { aCtx.fillStyle = color; lastColor = color; }
-					aCtx.fillText( gChar, c * targetCellW + halfCellW, y );
+					const spr = glyphSprite( gChar, gFont, color );
+					// integer dest coords = pure blit, no resample blur
+					aCtx.drawImage( spr,
+						( c * targetCellW + halfCellW - spr.width / 2 + 0.5 ) | 0,
+						( y - spr.height / 2 + 0.5 ) | 0 );
 				}
 			}
 			aCtx.globalAlpha = 1;
@@ -461,8 +511,7 @@
 			camera.aspect = window.innerWidth / window.innerHeight;
 			camera.updateProjectionMatrix();
 
-			renderer.setSize( window.innerWidth, window.innerHeight );
-
+			// renderer buffer is resized inside buildAsciiEngine (tracks the grid)
 			buildAsciiEngine();
 
 		}
@@ -490,11 +539,28 @@
 
 			if ( floor ) object.addPlaneY( 2, 12 );
 
-			// carve floor into a disc — fade field to 0 outside a circle (soft edge)
+			// carve floor into a disc — fade field to 0 outside a circle (soft edge).
+			// mask is static per field size, so precomputed once (see buildDiscMask)
 			const size = object.size;
+			if ( discMaskSize !== size ) buildDiscMask( size );
+			const field = object.field;
+			for ( let k = 0; k < discBases.length; k ++ ) {
+				const base = discBases[ k ], f = discFs[ k ];
+				for ( let y = 0; y < size; y ++ ) field[ base + y * size ] *= f;
+			}
+
+			object.update();
+
+		}
+
+		// disc carve mask: column base index + fade factor for every (x,z) outside
+		// the full-strength disc. geometry never changes, so computed once per size.
+		let discMaskSize = 0, discBases, discFs;
+		function buildDiscMask( size ) {
 			const half = size / 2;
 			const discR = 0.85;   // disc radius as fraction of half-extent
 			const feather = 0.12;  // soft-edge width
+			const bases = [], fs = [];
 			for ( let z = 0; z < size; z ++ ) {
 				for ( let x = 0; x < size; x ++ ) {
 					const dx = ( x - half ) / half;
@@ -502,16 +568,12 @@
 					const dist = Math.sqrt( dx * dx + dz * dz );
 					// 1 inside, 0 outside, smooth across feather band
 					const f = THREE.MathUtils.clamp( ( discR - dist ) / feather, 0, 1 );
-					if ( f < 1 ) {
-						for ( let y = 0; y < size; y ++ ) {
-							object.field[ x + y * size + z * size * size ] *= f;
-						}
-					}
+					if ( f < 1 ) { bases.push( x + z * size * size ); fs.push( f ); }
 				}
 			}
-
-			object.update();
-
+			discBases = Int32Array.from( bases );
+			discFs = Float32Array.from( fs );
+			discMaskSize = size;
 		}
 
 		//
