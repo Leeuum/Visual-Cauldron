@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<title>Visual Cauldron</title>
+	<link rel="icon" href="data:,">
+	<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+	<style>
+		body { margin: 0; overflow: hidden; }
+
+		/* typographic ASCII overlay — replaces the 3D view (canvas, drawn glyphs) */
+		#ascii {
+			position: fixed;
+			inset: 0;
+			pointer-events: none;     /* let orbit controls get the mouse */
+			z-index: 10;
+		}
+	</style>
+</head>
+
+<body>
+
+	<div id="container"></div>
+
+	<!-- three.js version defined ONCE here; both import-map URLs are built from it -->
+	<script>
+		const THREE_VERSION = '0.180.0';
+		const importmap = document.createElement( 'script' );
+		importmap.type = 'importmap';
+		importmap.textContent = JSON.stringify( {
+			imports: {
+				'three': `https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/build/three.module.js`,
+				'three/addons/': `https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/examples/jsm/`
+			}
+		} );
+		document.currentScript.after( importmap );
+
+		// start fetching the big three.js module immediately (before the module script parses)
+		const preload = document.createElement( 'link' );
+		preload.rel = 'modulepreload';
+		preload.href = `https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/build/three.module.js`;
+		document.head.appendChild( preload );
+	</script>
+
+	<script type="module">
+		import * as THREE from 'three';
+
+		import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+		import { MarchingCubes } from 'three/addons/objects/MarchingCubes.js';
+		import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+		import Stats from 'three/addons/libs/stats.module.js';
+
+		const stats = new Stats();
+		document.body.appendChild( stats.dom );
+		stats.dom.style.display = 'none';   // hidden by default — press F to show
+
+		let container;
+
+		let camera, scene, renderer, controls;
+
+		let light, ambientLight;
+
+		let effect;
+
+		let time = 0;
+
+		// fixed sim values (were GUI sliders)
+		const NUM_BLOBS = 10;
+		const RESOLUTION = 28;
+		const ISOLATION = 80;
+		const SPEED = 1.0;
+		const FLOOR = true;
+
+		const clock = new THREE.Clock();
+
+		function init() {
+
+			container = document.getElementById( 'container' );
+
+			// CAMERA
+
+			camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 10000 );
+			camera.position.set( - 1, 465, 3334 );
+
+			// SCENE
+
+			scene = new THREE.Scene();
+			scene.background = new THREE.Color( 0x000000 );
+
+			// live tweak from devtools console
+			window.scene = scene;
+			window.setBg = ( hex ) => {
+				scene.background.set( hex );
+			};
+
+			// LIGHTS
+
+			light = new THREE.DirectionalLight( 0xffffff, 0 );
+			light.position.set( 0.5, 0.5, 1 );
+			scene.add( light );
+
+			ambientLight = new THREE.AmbientLight( 0x323232, 250 );
+			scene.add( ambientLight );
+
+			window.light = light;
+			window.ambientLight = ambientLight;
+
+			// MATERIAL — matte green
+
+			const material = new THREE.MeshPhongMaterial( { color: 0x00ff00, specular: 0xffffff, shininess: 100 } );
+
+			// MARCHING CUBES
+
+			effect = new MarchingCubes( RESOLUTION, material, true, true, 100000 );
+			effect.position.set( 0, 0, 0 );
+			effect.scale.set( 700, 700, 700 );
+
+			window.effect = effect; // blob mesh — color via effect.material.color
+
+			effect.isolation = ISOLATION;
+			effect.enableUvs = false;
+			effect.enableColors = false;
+
+			scene.add( effect );
+
+			// CAULDRON (static glb — no blob interaction)
+
+			const loader = new GLTFLoader();
+			loader.load( 'cauldron.glb', ( gltf ) => {
+
+				const cauldron = gltf.scene;
+
+				// placement baked from devtools tuning
+				cauldron.scale.setScalar( 600 );
+				cauldron.position.set( 0, - 1050, 0 );
+
+				scene.add( cauldron );
+				console.log( 'cauldron.glb loaded ok' );
+
+				window.cauldronLights = [];
+				cauldron.traverse( ( o ) => {
+					if ( o.isLight ) window.cauldronLights.push( o );
+				} );
+				// baked tuned intensities (devtools), by load order; falls back to *360 if count differs
+				const CAULDRON_INTENSITIES = [ 156532070, 39133017, 46959621, 23479810 ];
+				window.cauldronLights.forEach( ( l, i ) => {
+					l.decay = 2;
+					l.intensity = CAULDRON_INTENSITIES[ i ] ?? l.intensity * 360;
+				} );
+				console.log( 'lights found:', window.cauldronLights );
+
+			},
+			undefined,
+			( err ) => console.error( 'cauldron.glb FAILED to load:', err )
+			);
+
+			// RENDERER
+			// The WebGL frame is never shown — only sampled by the ascii engine —
+			// so the buffer is kept tiny (grid × RENDER_SS, set in buildAsciiEngine).
+			// CSS stretches the canvas over the viewport so OrbitControls still
+			// receives mouse events across the whole window.
+
+			renderer = new THREE.WebGLRenderer( { powerPreference: 'high-performance' } );
+			renderer.domElement.style.width = '100vw';
+			renderer.domElement.style.height = '100vh';
+			renderer.setAnimationLoop( animate );
+			container.appendChild( renderer.domElement );
+
+			// CONTROLS (camera orbit)
+
+			controls = new OrbitControls( camera, renderer.domElement );
+			controls.minDistance = 500;
+			controls.maxDistance = 5000;
+			controls.target.set( 40, - 582, 37 );
+			controls.update();
+
+			// live tweak from devtools console — camInfo() prints paste-ready coords
+			window.camera = camera;
+			window.controls = controls;
+			window.camInfo = () => {
+				const p = camera.position, t = controls.target;
+				console.log(
+					`camera.position.set( ${Math.round(p.x)}, ${Math.round(p.y)}, ${Math.round(p.z)} );\n` +
+					`controls.target.set( ${Math.round(t.x)}, ${Math.round(t.y)}, ${Math.round(t.z)} );`
+				);
+			};
+
+			// TYPOGRAPHIC ASCII ENGINE (samples the WebGL canvas -> glyphs)
+
+			buildAsciiEngine();
+
+			// EVENTS
+
+			window.addEventListener( 'resize', onWindowResize );
+
+		}
+
+		// ---- Typographic ASCII engine ----------------------------------------
+		// Reads the rendered WebGL frame, downsamples it to a small brightness
+		// grid, and maps each cell to a real font glyph chosen to match both the
+		// ink density AND the target cell width (the "typographic" trick).
+
+		const CHARSET = " .,:;!+-=*#@%&abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+		const WEIGHTS = [ 300, 500, 800 ];
+		const STYLES = [ "normal", "italic" ];
+		const PROP_FAMILY = 'Georgia, Palatino, "Times New Roman", serif';
+		const OVERSAMPLE = 1;   // sample NxN canvas pixels per glyph cell
+		let BG = '#191919';   // ascii overlay background (what you actually see)
+		const FG = '#00ff00';   // match blob green
+
+		// --- phrase mode: the lit blob is spelled out of the company name ---
+		// bright cells emit the next letter of PHRASE in reading order (looping);
+		// dim fringe cells use SHADE_CHARS punctuation for texture. flowMode:
+		//   'scroll' = phrase stirs through the blob (animated, default)
+		//   'static' = letters pinned to cells, reads like a page
+		//   'off'    = original brightness-matched ASCII (no phrase)
+		const PHRASE = 'VISUALCAULDRON!';
+		const SHADE_CHARS = '.,:;-~+={}[]?/!"£$%^&*()"';   // dim-fringe shading glyphs
+		const LETTER_BRIGHT = 0.35;   // >= this brightness -> phrase letter, else shading
+		let SCROLL_SPEED = 10;   // phrase drift speed in 'scroll' mode (higher=faster, 0=frozen)
+		let GLYPH_SCALE = 0.78;   // glyph size vs cell (lower = more gap between letters, less overlap)
+		let flowMode = 'scroll';
+		// switch live: setFlow('static'|'scroll'|'off'), setScrollSpeed(n), setGlyphScale(n), or press M to cycle
+		window.setFlow = ( m ) => { if ( [ 'off', 'static', 'scroll' ].includes( m ) ) flowMode = m; };
+		window.setScrollSpeed = ( v ) => { SCROLL_SPEED = v; };
+		window.setGlyphScale = ( v ) => { GLYPH_SCALE = v; buildAsciiEngine(); };
+
+		// live tweak from devtools console — this is the REAL background
+		window.setAsciiBg = ( hex ) => { BG = hex; };
+
+		// visible output canvas (glyphs drawn here)
+		const asciiCanvas = document.createElement( 'canvas' );
+		asciiCanvas.id = 'ascii';
+		document.body.appendChild( asciiCanvas );
+		const aCtx = asciiCanvas.getContext( '2d', { alpha: false } );   // opaque = cheaper compositing
+
+		// hidden canvas for measuring glyph ink density
+		const measCanvas = document.createElement( 'canvas' );
+		measCanvas.width = measCanvas.height = 32
+		const mCtx = measCanvas.getContext( '2d', { willReadFrequently: true } );
+
+		// hidden canvas the WebGL frame gets shrunk into for sampling
+		const sampCanvas = document.createElement( 'canvas' );
+		const spCtx = sampCanvas.getContext( '2d', { willReadFrequently: true } );
+
+		let COLS, ROWS, FONT_SIZE, LINE_HEIGHT, targetCellW;
+
+		// font size (px per glyph cell) tracks camera distance to world centre:
+		// zoomed in (near) -> big glyphs, zoomed out (far) -> small glyphs
+		const CELL_MIN = 7;    // smallest glyph cell (camera far)
+		const CELL_MAX = 14;   // biggest glyph cell (camera near)
+		let currentCell = CELL_MIN;   // last-built cell size (rebuild only when it changes)
+
+		function cellForCamera() {
+			if ( ! controls ) return CELL_MIN;
+			const t = ( camera.position.distanceTo( controls.target ) - controls.minDistance )
+				/ ( controls.maxDistance - controls.minDistance );
+			const clamped = Math.max( 0, Math.min( 1, t ) );
+			// near (t=0) -> CELL_MAX, far (t=1) -> CELL_MIN
+			return Math.round( CELL_MAX - clamped * ( CELL_MAX - CELL_MIN ) );
+		}
+		let palette, brightnessLookup;
+		let letterLookup, shadeLookup, letterCutoffByte;   // phrase-mode lookups
+		const colorCache = {};   // quantized rgb -> "rgb(r,g,b)" string
+
+		const RENDER_SS = 3;      // WebGL pixels rendered per ascii cell (buffer = grid × this)
+		const engineCache = {};   // zoom-cell|viewport|scale -> prebuilt lookups (no rebuild hitch on zoom)
+		let spriteCache;          // font|color|char -> pre-drawn glyph canvas (blit beats fillText)
+
+		function estimateBrightness( ch, font ) {
+			const size = 32;
+			mCtx.clearRect( 0, 0, size, size );
+			mCtx.font = font;
+			mCtx.fillStyle = '#fff';
+			mCtx.textBaseline = 'middle';
+			mCtx.fillText( ch, 1, size / 2 );
+			const data = mCtx.getImageData( 0, 0, size, size ).data;
+			let sum = 0;
+			for ( let i = 3; i < data.length; i += 4 ) sum += data[ i ];
+			return sum / ( 255 * size * size );
+		}
+
+		function measureWidth( ch, font ) {
+			mCtx.font = font;
+			return mCtx.measureText( ch ).width;
+		}
+
+		function findBest( target ) {
+			let lo = 0, hi = palette.length - 1;
+			while ( lo < hi ) {
+				const mid = ( lo + hi ) >> 1;
+				if ( palette[ mid ].brightness < target ) lo = mid + 1;
+				else hi = mid;
+			}
+			let bestScore = Infinity, best = palette[ lo ];
+			const start = Math.max( 0, lo - 15 );
+			const end = Math.min( palette.length, lo + 15 );
+			for ( let i = start; i < end; i ++ ) {
+				const e = palette[ i ];
+				const bErr = Math.abs( e.brightness - target ) * 2.5;
+				const wErr = Math.abs( e.width - targetCellW ) / targetCellW;
+				const score = bErr + wErr;
+				if ( score < bestScore ) { bestScore = score; best = e; }
+			}
+			return best;
+		}
+
+		function buildAsciiEngine() {
+
+			// grid sized to fill the viewport, cells keep a text-ish aspect
+			// COLS scales with width so glyph SIZE stays ~constant (more cols when wider, not bigger text)
+			currentCell = cellForCamera();   // px per glyph cell — driven by camera zoom
+			COLS = Math.max( 20, Math.round( window.innerWidth / currentCell ) );
+			const cellPxW = window.innerWidth / COLS;
+			LINE_HEIGHT = Math.max( 6, Math.round( cellPxW / 0.5 ) );
+			FONT_SIZE = Math.round( LINE_HEIGHT * 0.92 * GLYPH_SCALE );
+			ROWS = Math.max( 1, Math.floor( window.innerHeight / LINE_HEIGHT ) );
+			targetCellW = cellPxW;
+
+			// size the visible canvas to the viewport
+			asciiCanvas.width = window.innerWidth;
+			asciiCanvas.height = window.innerHeight;
+
+			sampCanvas.width = COLS * OVERSAMPLE;
+			sampCanvas.height = ROWS * OVERSAMPLE;
+
+			// size the (hidden) WebGL buffer to just what the sampler needs —
+			// aspect doesn't matter, every stage is a full-rect stretch
+			if ( renderer ) renderer.setSize( COLS * RENDER_SS, ROWS * RENDER_SS, false );
+
+			// reuse a previously built engine for this zoom level / viewport
+			const cacheKey = `${currentCell}|${window.innerWidth}x${window.innerHeight}|${GLYPH_SCALE}`;
+			const cached = engineCache[ cacheKey ];
+			if ( cached ) {
+				( { palette, brightnessLookup, letterLookup, shadeLookup, letterCutoffByte, spriteCache } = cached );
+				return;
+			}
+
+			// build glyph palette (brightness + width per weight/style variant)
+			palette = [];
+			for ( const style of STYLES ) {
+				for ( const weight of WEIGHTS ) {
+					const font = `${style === 'italic' ? 'italic ' : ''}${weight} ${FONT_SIZE}px ${PROP_FAMILY}`;
+					for ( const ch of CHARSET ) {
+						if ( ch === ' ' ) continue;
+						const width = measureWidth( ch, font );
+						if ( width <= 0 ) continue;
+						const brightness = estimateBrightness( ch, font );
+						palette.push( { char: ch, font, width, brightness } );
+					}
+				}
+			}
+			const maxB = Math.max( ...palette.map( ( e ) => e.brightness ) );
+			if ( maxB > 0 ) for ( const e of palette ) e.brightness /= maxB;
+			palette.sort( ( a, b ) => a.brightness - b.brightness );
+
+			// precompute brightness byte -> { char, font, alpha } (null = blank)
+			brightnessLookup = [];
+			for ( let byte = 0; byte < 256; byte ++ ) {
+				const brightness = byte / 255;
+				if ( brightness < 0.03 ) { brightnessLookup.push( null ); continue; }
+				const m = findBest( brightness );
+				const alpha = Math.max( 0.1, Math.min( 1, Math.round( brightness * 10 ) / 10 ) );
+				brightnessLookup.push( { char: m.char, font: m.font, alpha } );
+			}
+
+			// --- phrase-mode lookups ---
+			// shading glyphs for the dim fringe, width-matched like the main palette
+			const shadePalette = [];
+			for ( const style of STYLES ) {
+				for ( const weight of WEIGHTS ) {
+					const font = `${style === 'italic' ? 'italic ' : ''}${weight} ${FONT_SIZE}px ${PROP_FAMILY}`;
+					for ( const ch of SHADE_CHARS ) {
+						const width = measureWidth( ch, font );
+						if ( width <= 0 ) continue;
+						const brightness = estimateBrightness( ch, font );
+						shadePalette.push( { char: ch, font, width, brightness } );
+					}
+				}
+			}
+			const shadeMaxB = Math.max( ...shadePalette.map( ( e ) => e.brightness ) );
+			if ( shadeMaxB > 0 ) for ( const e of shadePalette ) e.brightness /= shadeMaxB;
+
+			// phrase letters get heavier weight as the cell brightens (dim->light, bright->bold)
+			const letterFonts = WEIGHTS.map( ( w ) => `${w} ${FONT_SIZE}px ${PROP_FAMILY}` );
+			letterCutoffByte = Math.round( LETTER_BRIGHT * 255 );
+
+			letterLookup = [];
+			shadeLookup = [];
+			for ( let byte = 0; byte < 256; byte ++ ) {
+				const brightness = byte / 255;
+				if ( brightness < 0.03 ) { letterLookup.push( null ); shadeLookup.push( null ); continue; }
+				const alpha = Math.max( 0.1, Math.min( 1, Math.round( brightness * 10 ) / 10 ) );
+				// letter weight ramps across the bright band
+				const t = Math.max( 0, ( brightness - LETTER_BRIGHT ) / ( 1 - LETTER_BRIGHT ) );
+				const wi = Math.min( letterFonts.length - 1, Math.floor( t * letterFonts.length ) );
+				letterLookup.push( { font: letterFonts[ wi ], alpha } );
+				// nearest shading glyph by brightness + cell width
+				let best = shadePalette[ 0 ], bestScore = Infinity;
+				for ( const e of shadePalette ) {
+					const score = Math.abs( e.brightness - brightness ) * 2.5
+						+ Math.abs( e.width - targetCellW ) / targetCellW;
+					if ( score < bestScore ) { bestScore = score; best = e; }
+				}
+				shadeLookup.push( best ? { char: best.char, font: best.font, alpha } : null );
+			}
+
+			spriteCache = new Map();
+			engineCache[ cacheKey ] = { palette, brightnessLookup, letterLookup, shadeLookup, letterCutoffByte, spriteCache };
+		}
+
+		// pre-rendered glyph sprite — rasterise each font|color|char once, then blit.
+		// drawImage of a tiny canvas is several times cheaper than fillText per cell.
+		function glyphSprite( ch, font, color ) {
+			const key = font + '|' + color + '|' + ch;
+			let s = spriteCache.get( key );
+			if ( s === undefined ) {
+				s = document.createElement( 'canvas' );
+				s.width = Math.ceil( targetCellW * 2 );    // 2x cell: room for italic overhang
+				s.height = Math.ceil( LINE_HEIGHT * 2 );
+				const g = s.getContext( '2d' );
+				g.font = font;
+				g.textAlign = 'center';
+				g.textBaseline = 'middle';
+				g.fillStyle = color;
+				g.fillText( ch, s.width / 2, s.height / 2 );
+				spriteCache.set( key, s );
+			}
+			return s;
+		}
+
+		function updateAscii() {
+			const w = sampCanvas.width, h = sampCanvas.height;
+			// shrink the current WebGL frame into the sampling canvas
+			spCtx.drawImage( renderer.domElement, 0, 0, w, h );
+			const data = spCtx.getImageData( 0, 0, w, h ).data;
+
+			// clear to bg
+			aCtx.fillStyle = BG;
+			aCtx.fillRect( 0, 0, asciiCanvas.width, asciiCanvas.height );
+
+			let lastAlpha = -1;
+			const halfCellW = targetCellW / 2;
+			const halfLine = LINE_HEIGHT / 2;
+			// letters are pinned to grid POSITION (not a running count), so a cell
+			// always shows the same letter — the blob morphing reveals/hides letters
+			// instead of reshuffling them. scroll drifts the whole ribbon over time.
+			const scroll = flowMode === 'scroll' ? Math.floor( time * SCROLL_SPEED ) : 0;
+
+			for ( let r = 0; r < ROWS; r ++ ) {
+				const y = r * LINE_HEIGHT + halfLine;
+				for ( let c = 0; c < COLS; c ++ ) {
+					// average RGB over the oversample block
+					let sr = 0, sg = 0, sb = 0;
+					for ( let sy = 0; sy < OVERSAMPLE; sy ++ ) {
+						const py = r * OVERSAMPLE + sy;
+						for ( let sx = 0; sx < OVERSAMPLE; sx ++ ) {
+							const px = c * OVERSAMPLE + sx;
+							const i = ( py * w + px ) * 4;
+							sr += data[ i ]; sg += data[ i + 1 ]; sb += data[ i + 2 ];
+						}
+					}
+					const n = OVERSAMPLE * OVERSAMPLE;
+					const rr = sr / n, gg = sg / n, bb = sb / n;
+					const lum = 0.2126 * rr + 0.7152 * gg + 0.0722 * bb;
+					const byte = Math.min( 255, lum | 0 );
+
+					// pick the glyph: phrase letter, shading punctuation, or original ASCII
+					let gChar, gFont, gAlpha;
+					if ( flowMode === 'off' ) {
+						const entry = brightnessLookup[ byte ];
+						if ( entry === null ) continue;   // blank cell, skip draw
+						gChar = entry.char; gFont = entry.font; gAlpha = entry.alpha;
+					} else if ( byte >= letterCutoffByte ) {
+						const L = letterLookup[ byte ];   // never null above cutoff
+						gChar = PHRASE[ ( r * COLS + c + scroll ) % PHRASE.length ];
+						gFont = L.font; gAlpha = L.alpha;
+					} else {
+						const S = shadeLookup[ byte ];
+						if ( S === null ) continue;   // blank fringe, skip draw
+						gChar = S.char; gFont = S.font; gAlpha = S.alpha;
+					}
+
+					// boost pixel to full brightness -> pure material hue
+					const mx = Math.max( rr, gg, bb ) || 1;
+					const s = 255 / mx;
+					// quantize to 5 bits/channel so fillStyle strings cache well
+					const cr = ( rr * s ) & 0xf8, cg = ( gg * s ) & 0xf8, cb = ( bb * s ) & 0xf8;
+					const color = colorCache[ ( cr << 16 ) | ( cg << 8 ) | cb ] ||
+						( colorCache[ ( cr << 16 ) | ( cg << 8 ) | cb ] = `rgb(${cr},${cg},${cb})` );
+
+					if ( gAlpha !== lastAlpha ) { aCtx.globalAlpha = gAlpha; lastAlpha = gAlpha; }
+					const spr = glyphSprite( gChar, gFont, color );
+					// integer dest coords = pure blit, no resample blur
+					aCtx.drawImage( spr,
+						( c * targetCellW + halfCellW - spr.width / 2 + 0.5 ) | 0,
+						( y - spr.height / 2 + 0.5 ) | 0 );
+				}
+			}
+			aCtx.globalAlpha = 1;
+		}
+
+		// kick everything off (after all declarations exist — avoids TDZ)
+		init();
+
+		//
+
+		function onWindowResize() {
+
+			camera.aspect = window.innerWidth / window.innerHeight;
+			camera.updateProjectionMatrix();
+
+			// renderer buffer is resized inside buildAsciiEngine (tracks the grid)
+			buildAsciiEngine();
+
+		}
+
+		// this controls content of marching cubes voxel field
+
+		function updateCubes( object, time, numblobs, floor ) {
+
+			object.reset();
+
+			// fill the field with some metaballs
+
+			const subtract = 12;
+			const strength = 1.2 / ( ( Math.sqrt( numblobs ) - 1 ) / 4 + 1 );
+
+			for ( let i = 0; i < numblobs; i ++ ) {
+
+				const ballx = Math.sin( i + 1.26 * time * ( 1.03 + 0.5 * Math.cos( 0.21 * i ) ) ) * 0.27 + 0.5;
+				const bally = Math.abs( Math.cos( i + 1.12 * time * Math.cos( 1.22 + 0.1424 * i ) ) ) * 0.77; // dip into the floor
+				const ballz = Math.cos( i + 1.32 * time * 0.1 * Math.sin( ( 0.92 + 0.53 * i ) ) ) * 0.27 + 0.5;
+
+				object.addBall( ballx, bally, ballz, strength, subtract );
+
+			}
+
+			if ( floor ) object.addPlaneY( 2, 12 );
+
+			// carve floor into a disc — fade field to 0 outside a circle (soft edge).
+			// mask is static per field size, so precomputed once (see buildDiscMask)
+			const size = object.size;
+			if ( discMaskSize !== size ) buildDiscMask( size );
+			const field = object.field;
+			for ( let k = 0; k < discBases.length; k ++ ) {
+				const base = discBases[ k ], f = discFs[ k ];
+				for ( let y = 0; y < size; y ++ ) field[ base + y * size ] *= f;
+			}
+
+			object.update();
+
+		}
+
+		// disc carve mask: column base index + fade factor for every (x,z) outside
+		// the full-strength disc. geometry never changes, so computed once per size.
+		let discMaskSize = 0, discBases, discFs;
+		function buildDiscMask( size ) {
+			const half = size / 2;
+			const discR = 0.85;   // disc radius as fraction of half-extent
+			const feather = 0.12;  // soft-edge width
+			const bases = [], fs = [];
+			for ( let z = 0; z < size; z ++ ) {
+				for ( let x = 0; x < size; x ++ ) {
+					const dx = ( x - half ) / half;
+					const dz = ( z - half ) / half;
+					const dist = Math.sqrt( dx * dx + dz * dz );
+					// 1 inside, 0 outside, smooth across feather band
+					const f = THREE.MathUtils.clamp( ( discR - dist ) / feather, 0, 1 );
+					if ( f < 1 ) { bases.push( x + z * size * size ); fs.push( f ); }
+				}
+			}
+			discBases = Int32Array.from( bases );
+			discFs = Float32Array.from( fs );
+			discMaskSize = size;
+		}
+
+		//
+
+		// press M to cycle phrase flow: scroll -> static -> off -> scroll
+		window.addEventListener( 'keydown', ( e ) => {
+			if ( e.key === 'm' || e.key === 'M' ) {
+				const order = [ 'scroll', 'static', 'off' ];
+				flowMode = order[ ( order.indexOf( flowMode ) + 1 ) % order.length ];
+				console.log( 'flowMode:', flowMode );
+			}
+			if ( e.key === 'f' || e.key === 'F' ) {
+				stats.dom.style.display = stats.dom.style.display === 'none' ? '' : 'none';
+			}
+		} );
+
+		function animate() {
+
+			render();
+
+		}
+
+		function render() {
+
+			const delta = clock.getDelta();
+
+			time += delta * SPEED * 0.5;
+
+			updateCubes( effect, time, NUM_BLOBS, FLOOR );
+
+			// render
+
+			renderer.render( scene, camera );
+
+			// rebuild glyph palette only when camera zoom crosses to a new cell size
+			if ( cellForCamera() !== currentCell ) buildAsciiEngine();
+
+			// sample the frame we just drew and turn it into glyphs
+			updateAscii();
+
+			stats.update();
+
+		}
+
+	</script>
+
+</body>
+</html>
